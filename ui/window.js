@@ -61,7 +61,8 @@ var CosmicTwitchChatWindow = class CosmicTwitchChatWindow {
         this._app     = application;
         this._channel = channel;
         this._chat    = new ChatView();
-        this._irc     = null;
+        this._irc             = null;
+        this._layerShellActive = false;
 
         this._win = new Gtk.ApplicationWindow({
             application,
@@ -73,8 +74,8 @@ var CosmicTwitchChatWindow = class CosmicTwitchChatWindow {
         });
 
         this._loadCSS();
+        this._applyLayerShell(); // deve rodar antes de _buildLayout e present()
         this._buildLayout();
-        this._applyLayerShell();
         this._bindShortcuts();
         this._startIRC();
         this._bgIndex = WIN_BG_DEFAULT;
@@ -139,6 +140,14 @@ var CosmicTwitchChatWindow = class CosmicTwitchChatWindow {
             xalign:  0.0,
         }));
 
+        if (!this._layerShellActive) {
+            const warn = new Gtk.Label({
+                label:        '⚠ Overlay OFF',
+                tooltip_text: 'gtk4-layer-shell não instalado — janela não está sempre à frente nem flutuante',
+            });
+            bar.append(warn);
+        }
+
         this._bgBtn = new Gtk.Button({ label: 'BG: Nenhum' });
         this._bgBtn.connect('clicked', () => this._cycleBg());
         bar.append(this._bgBtn);
@@ -162,7 +171,14 @@ var CosmicTwitchChatWindow = class CosmicTwitchChatWindow {
     }
 
     _applyLayerShell() {
-        if (!LayerShell) return;
+        if (!LayerShell) {
+            log('[window] gtk4-layer-shell não encontrado — janela operará em modo normal');
+            log('[window] Para overlay automático (sempre à frente + flutuante), instale:');
+            log('[window]   Ubuntu 24+:      sudo apt install libgtk4-layer-shell0 gir1.2-gtk4layershell-0.1');
+            log('[window]   Fedora/COSMIC:   sudo dnf install gtk4-layer-shell');
+            log('[window]   Arch:            sudo pacman -S gtk4-layer-shell');
+            return;
+        }
         try {
             LayerShell.init_for_window(this._win);
             LayerShell.set_layer(this._win,     LayerShell.Layer.OVERLAY);
@@ -175,6 +191,12 @@ var CosmicTwitchChatWindow = class CosmicTwitchChatWindow {
             // Don't reserve space — other windows draw under this overlay
             LayerShell.set_exclusive_zone(this._win, 0);
             LayerShell.set_namespace(this._win, 'cosmic-twitch-chat');
+            // ON_DEMAND: compositor concede foco de teclado quando o usuário
+            // interage com a janela — necessário para os atalhos funcionarem
+            // no modo overlay (padrão NONE bloquearia todo input de teclado)
+            LayerShell.set_keyboard_mode(this._win, LayerShell.KeyboardMode.ON_DEMAND);
+            this._layerShellActive = true;
+            log('[window] gtk4-layer-shell ativo — modo overlay ON (sempre à frente + flutuante)');
         } catch (e) {
             logError(e, '[window] LayerShell setup failed — falling back to normal window');
         }

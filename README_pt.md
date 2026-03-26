@@ -38,29 +38,59 @@ Construído com GJS + GTK4, ele se conecta diretamente ao IRC da Twitch via WebS
 sudo apt install gjs gir1.2-gtk-4.0 gir1.2-soup-3.0 glib-networking
 ```
 
-**Dependência opcional** — overlay nativo Wayland (ancora na borda direita da tela, sempre visível acima de outras janelas):
+### 2. Instale ou compile gtk4-layer-shell (opcional, mas recomendado)
 
+**gtk4-layer-shell** ativa o modo overlay nativo do Wayland: a janela do chat fica ancorada na borda da tela, permanece **sempre no topo**, e nunca rouba foco.
+
+#### Para Fedora / COSMIC (DNF)
 ```bash
-# Ubuntu 24.04+
-sudo apt install libgtk4-layer-shell0 gir1.2-gtk4layershell-0.1
-
-# Fedora / COSMIC OS
 sudo dnf install gtk4-layer-shell
+```
 
-# Arch
+#### Para Arch
+```bash
 sudo pacman -S gtk4-layer-shell
 ```
 
-> Sem o `gtk4-layer-shell` o app funciona normalmente como uma janela comum — basta posicioná-la manualmente sobre o jogo.
+#### Para Ubuntu 24.04+ (se disponível no seu mirror)
+```bash
+sudo add-apt-repository universe
+sudo apt update
+sudo apt install libgtk4-layer-shell0 gir1.2-gtk4layershell-0.1
+```
 
-### 2. Clone o repositório
+#### Para Pop!_OS 24.04 ou se os pacotes não estiverem disponíveis
+Os mirrors do Pop!_OS não incluem o pacote — compile do código-fonte:
+
+```bash
+# Instale as dependências de compilação
+sudo apt install -y meson ninja-build gobject-introspection libwayland-dev \
+  wayland-protocols libgtk-4-dev valac git
+
+# Clone e compile
+cd /tmp
+git clone --depth=1 https://github.com/wmww/gtk4-layer-shell.git
+cd gtk4-layer-shell
+meson setup build -Dexamples=false -Ddocs=false -Dtests=false
+ninja -C build
+sudo ninja -C build install
+sudo ldconfig
+
+# Corrija o symbol lookup do GJS (conecte a lib ao diretório systemwide)
+sudo ln -sf /usr/local/lib/x86_64-linux-gnu/girepository-1.0/Gtk4LayerShell-1.0.typelib \
+  /usr/lib/x86_64-linux-gnu/girepository-1.0/Gtk4LayerShell-1.0.typelib
+```
+
+> **Sem gtk4-layer-shell:** o app funciona como uma janela comum — posicione-a manualmente sobre o jogo. Se a lib não for encontrada, a janela mostra um indicador `⚠ Overlay OFF`.
+
+### 3. Clone o repositório
 
 ```bash
 git clone https://github.com/felipejesus-front/twitch-chat-overlay-wayland.git
 cd cosmic-twitch-chat
 ```
 
-### 3. Execute
+### 4. Execute
 
 ```bash
 gjs main.js <canal>
@@ -101,12 +131,24 @@ cosmic-twitch-chat/
 
 ---
 
-## Notas sobre Wayland
+## Modo Overlay Wayland (gtk4-layer-shell)
 
+### Como funciona
+
+Quando **gtk4-layer-shell** está instalado, o app automaticamente:
+
+1. **Auto-preload da lib** — `main.js` detecta a lib e se re-executa com `LD_PRELOAD` configurado, garantindo que a interceptação ocorra antes que GTK conecte ao compositor Wayland.
+2. **Cria uma surface layer-shell** — em vez de uma janela normal, o app usa o protocolo Wayland `wl-layer-shell` para requisitar a camada `OVERLAY`.
+3. **Ancora na borda da tela** — posicionada `12px` da borda direita, esticada verticalmente, sempre acima de tudo.
+4. **Habilita modo de teclado** — configurado como `ON_DEMAND` para que os atalhos de teclado (`Esc`, `Ctrl+B`, `Ctrl+Shift+C`) funcionem em modo overlay.
+
+### Diagnóstico
+
+- **Sem aviso `⚠ Overlay OFF`** — lib está instalada e ativa.
+- **Mostra `⚠ Overlay OFF`** — gtk4-layer-shell não encontrado. Instale-a (veja seção 2).
 - **Transparência** funciona automaticamente em qualquer compositor RGBA (COSMIC, Mutter, KWin Wayland).  
-  Se aparecer fundo preto, verifique se o compositor tem transparência habilitada e confirme que está em Wayland: `echo $XDG_SESSION_TYPE`
-- **Always-on-top** no Wayland não é garantido via API padrão do GTK. Com `gtk4-layer-shell` instalado, a janela usa uma superfície de layer-shell real e fica sempre acima das demais sem roubar foco.
-- **XWayland / X11** também é suportado — use o "sempre no topo" do seu gerenciador de janelas.
+  Se aparecer fundo preto, verifique se o compositor tem transparência habilitada: `echo $XDG_SESSION_TYPE` deve retornar `wayland`.
+- **XWayland / X11** — também suportado sem gtk4-layer-shell; use o recurso "sempre no topo" do seu gerenciador de janelas.
 
 ---
 
@@ -118,3 +160,40 @@ cosmic-twitch-chat/
 - [ ] Arquivo de configuração (fonte, opacidade, largura, canal)
 - [ ] Multi-canal com abas
 - [ ] Destaque de menções do seu username
+
+---
+
+## Detalhes Técnicos (mudanças v1.x)
+
+### Melhorias principais
+
+#### `main.js` — mecanismo de auto-preload
+- **Problema:** gtk4-layer-shell precisa interceptar a chamada `wl_registry_add_listener` do Wayland, mas o GJS carrega a typelib muito tarde (depois que GTK já conectou).
+- **Solução:** Na inicialização, `main.js` detecta se a lib está disponível e se re-executa com `LD_PRELOAD=/usr/local/lib/x86_64-linux-gnu/libgtk4-layer-shell.so`. Uma variável sentinel `_COSMIC_PRELOADED=1` evita recursão infinita.
+- **Resultado:** `gjs main.js canal` agora funciona out-of-the-box sem precisar de `LD_PRELOAD` manual.
+
+#### `ui/window.js` — ordem de inicialização & modo de teclado
+- **Correção de ordem:** `_applyLayerShell()` agora executa **antes** de `_buildLayout()`, conforme exige a especificação do layer-shell.
+- **Modo de teclado:** Adicionado `LayerShell.set_keyboard_mode(..., ON_DEMAND)` — com o modo padrão `NONE`, janelas overlay silenciosamente dropavam todos os eventos de teclado, quebrando atalhos como `Esc`, `Ctrl+B`, `Ctrl+Shift+C`.
+- **Indicador visual:** Mostra `⚠ Overlay OFF` na barra de controle se a lib não for encontrada, com um tooltip explicando o que instalar.
+
+#### Posicionamento da janela
+- Ancora na **borda direita** da tela com margem de 12px (customizável via `LayerShell.set_margin()`).
+- Estica na **altura total** (anchors top + bottom habilitados).
+- Fica na camada **OVERLAY** — sempre acima de outras janelas, não pode ser coberta.
+
+### Diagnóstico
+
+Se o modo overlay não estiver funcionando:
+
+```bash
+# Verifique se está em Wayland
+echo $XDG_SESSION_TYPE
+
+# Verifique se a lib está acessível
+ls /usr/local/lib/x86_64-linux-gnu/libgtk4-layer-shell.so
+ls /usr/lib/x86_64-linux-gnu/girepository-1.0/Gtk4LayerShell-1.0.typelib
+
+# Execute com verbose logging
+gjs main.js <canal> 2>&1 | grep -i layer
+```
