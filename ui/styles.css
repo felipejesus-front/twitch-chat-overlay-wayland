@@ -1,0 +1,110 @@
+/* ============================================================================
+   Cosmic Twitch Chat — Overlay Stylesheet
+   Optimised for Wayland + COSMIC / any dark-compositor environment.
+   ============================================================================ */
+
+/* ── Window shell ─────────────────────────────────────────────────────────── */
+
+/*
+ * Make the window and every GTK chrome layer fully transparent so the
+ * compositor's RGBA surface shows through directly.
+ * .csd / decoration cover the client-side-decoration shadow box.
+ */
+window,
+.csd,
+decoration {
+    background-color: transparent;
+    box-shadow: none;
+    border: none;
+}
+
+/* ── Window background levels (applied as CSS class on the window widget) ─── */
+window.win-bg-low    { background-color: rgba(0, 0, 0, 0.20); }
+window.win-bg-medium { background-color: rgba(0, 0, 0, 0.45); }
+window.win-bg-high   { background-color: rgba(0, 0, 0, 0.72); }
+
+/* ── Layout containers ────────────────────────────────────────────────────── */
+
+.overlay-root,
+scrolledwindow,
+viewport {
+    background-color: transparent;
+}
+
+/* ── Chat message row ─────────────────────────────────────────────────────── */
+
+.chat-message {
+    background-color: rgba(0, 0, 0, 0.45);
+    padding: 3px 8px;
+    border-radius: 4px;
+
+    /*
+     * Start invisible.  JavaScript adds the .visible class on the next idle
+     * frame, causing the transition to fire and the message to fade in.
+     */
+    opacity: 0;
+    transition: opacity 280ms ease-in-out;
+}
+
+.chat-message.visible {
+    opacity: 1;
+}
+/* ── Control bar ──────────────────────────────────────────────────────────── */
+
+.control-bar {
+    background-color: rgba(0, 0, 0, 0.55);
+    padding: 3px 8px;
+}
+
+.control-bar button {
+    background-color: rgba(255, 255, 255, 0.10);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 4px;
+    color: #d8d8d8;
+    font-size: 11px;
+    padding: 1px 8px;
+    min-height: 0;
+    box-shadow: none;
+}
+
+.control-bar button:hover {
+    background-color: rgba(255, 255, 255, 0.22);
+}
+
+.control-bar label {
+    color: #a0a0a0;
+    font-size: 11px;
+    text-shadow: none;
+}
+/* ── Text ─────────────────────────────────────────────────────────────────── */
+
+label {
+    color: #f0f0f0;
+    font-size: 20px;
+    font-family: "Inter", "Ubuntu", "Noto Sans", sans-serif;
+
+    /*
+     * Double shadow: a tight dark halo for crisp outlines + a wider soft glow.
+     * This keeps text legible on any background colour without a box behind it.
+     */
+    text-shadow:
+        1px  1px 2px rgba(0, 0, 0, 0.95),
+        0px  0px 6px rgba(0, 0, 0, 0.80);
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+
+scrollbar {
+    background-color: transparent;
+}
+
+scrollbar slider {
+    background-color: rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    min-width: 3px;
+    min-height: 3px;
+}
+
+scrollbar slider:hover {
+    background-color: rgba(255, 255, 255, 0.28);
+}
