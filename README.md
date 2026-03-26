@@ -82,6 +82,7 @@ sudo ln -sf /usr/local/lib/x86_64-linux-gnu/girepository-1.0/Gtk4LayerShell-1.0.
 ```
 
 > **Without gtk4-layer-shell:** the app still works as a normal window — just position it manually over your game. If the lib is not found, the window shows a `⚠ Overlay OFF` indicator.
+> In this mode, keyboard shortcuts (Esc, Ctrl+B, Ctrl+Shift+C) **will work** because the window receives focus.
 
 ### 3. Clone the repository
 
@@ -104,7 +105,68 @@ gjs main.js '#gaules'   # with or without # — both work
 
 > **Important:** always run from the project root directory.
 
-### Keyboard shortcuts
+### Alternative: Install system-wide
+
+Instead of running from the project directory, you can install the app globally:
+
+#### Method A: Via make install
+```bash
+sudo make install      # installs to /usr/share and /usr/bin
+cosmic-twitch-chat --set-channel gaules   # save default channel
+cosmic-twitch-chat     # run with saved channel
+```
+
+#### Method B: Via .deb package
+```bash
+make deb               # generates build/cosmic-twitch-chat_1.0.0_all.deb
+sudo dpkg -i build/cosmic-twitch-chat_1.0.0_all.deb
+```
+
+Once installed, the app appears in your COSMIC launcher as **"Cosmic Twitch Chat"**.
+
+#### Method C: Set a default channel
+```bash
+# Save channel for later
+gjs main.js --set-channel gaules
+
+# Run without arguments — it uses the saved channel
+gjs main.js
+```
+
+Default channel is stored in `~/.config/cosmic-twitch-chat/channel`.
+
+#### Uninstall
+```bash
+sudo make uninstall    # if installed via make install
+# or
+sudo dpkg -r cosmic-twitch-chat   # if installed via deb
+```
+
+### Closing the overlay
+
+Since the chat is transparent and click-through (mouse events pass to the game), keyboard shortcuts don't work while it has focus.
+
+**How to close:**
+
+- Via command line:
+  ```bash
+  gjs main.js --quit    # terminates the running instance
+  ```
+
+- In terminal:
+  ```bash
+  Ctrl+C    # stops the process
+  ```
+
+- Custom COSMIC shortcut:
+  - Open **COSMIC Settings → Keyboard → Shortcuts**
+  - Click **+** to add custom shortcut
+  - Set **Command** to: `gjs /usr/share/cosmic-twitch-chat/main.js --quit`
+  - Bind to (e.g.) **Ctrl+Shift+Esc**
+
+### Keyboard shortcuts (legacy)
+
+If you're running in **non-overlay mode** (without gtk4-layer-shell or with a modified setup), keyboard shortcuts work:
 
 | Key | Action |
 |-----|--------|
@@ -156,10 +218,47 @@ When **gtk4-layer-shell** is installed, the app automatically:
 
 - [ ] Emote support (BetterTTV / FFZ / 7TV)
 - [ ] Subscriber, moderator and broadcaster badges
-- [ ] Click-through — mouse events pass through to the app underneath
 - [ ] Config file (font size, opacity, width, channel)
 - [ ] Multi-channel with tabs
 - [ ] Username mention highlighting
+- [ ] Edit mode toggle — temporarily make window moveable & focusable for repositioning
+
+---
+
+## Build & Packaging
+
+### Requirements
+
+- `gjs` (GNOME JavaScript runtime)
+- `gir1.2-gtk-4.0` and `gir1.2-soup-3.0` (GObject Introspection bindings)
+- `make` (to build the package)
+- `dpkg-deb` (to generate .deb package; comes with `dpkg`)
+
+All are lightweight text/script tools — no compilation needed.
+
+### Makefile targets
+
+```bash
+make install              # Install globally to /usr/share and /usr/bin
+make uninstall            # Remove system-wide installation
+make deb                  # Generate .deb package in build/
+make clean                # Remove build/ directory
+```
+
+### Custom version in .deb
+
+```bash
+make deb VERSION=2.0.0    # Generates cosmic-twitch-chat_2.0.0_all.deb
+```
+
+### For distribution maintainers
+
+The package declares:
+- **Depends:** `gjs`, `gir1.2-gtk-4.0`, `gir1.2-soup-3.0`
+- **Recommends:** `gtk4-layer-shell` (optional but highly recommended)
+- **Architecture:** `all` (script-based, runs on any system with GJS/GTK4)
+
+All files are placed under `/usr/share/cosmic-twitch-chat/` with a simple bash wrapper at `/usr/bin/cosmic-twitch-chat`.
 
 ---
 
@@ -167,20 +266,22 @@ When **gtk4-layer-shell** is installed, the app automatically:
 
 ### Key improvements
 
-#### `main.js` — auto-preload mechanism
-- **Problem:** gtk4-layer-shell must intercept the Wayland `wl_registry_add_listener` call, but GJS loads the typelib too late (after GTK already connects).
-- **Solution:** At startup, `main.js` detects if the lib is available and re-executes itself with `LD_PRELOAD=/usr/local/lib/x86_64-linux-gnu/libgtk4-layer-shell.so`. A sentinel variable `_COSMIC_PRELOADED=1` prevents infinite recursion.
-- **Result:** `gjs main.js channel` now works out-of-the-box without manual `LD_PRELOAD`.
+#### `main.js` — auto-preload mechanism & CLI features
+- **Auto-preload:** Detects if gtk4-layer-shell is available and re-executes with `LD_PRELOAD` set before GTK connects to Wayland.
+- **Multi-path search:** Looks for the library in standard locations: `/usr/local/lib/...`, `/usr/lib/...`, `/usr/lib64/...`
+- **`--quit` flag:** Reads PID from `~/.cache/cosmic-twitch-chat/pid` and sends `kill` signal to the running instance.
+- **`--set-channel` flag:** Saves channel name to `~/.config/cosmic-twitch-chat/channel` for future runs without arguments.
+- **PID file:** Automatically written by the app at startup and cleaned on shutdown (SIGTERM/SIGINT handlers).
 
 #### `ui/window.js` — initialization order & keyboard mode
 - **Init order fix:** `_applyLayerShell()` now runs **before** `_buildLayout()`, as the layer-shell spec requires.
 - **Keyboard mode:** Added `LayerShell.set_keyboard_mode(..., ON_DEMAND)` — with the default `NONE` mode, overlay windows silently dropped all keyboard events, breaking shortcuts like `Esc`, `Ctrl+B`, `Ctrl+Shift+C`.
 - **Visual indicator:** Shows `⚠ Overlay OFF` in the control bar if the lib is not found, with a tooltip explaining what to install.
 
-#### Window positioning
-- Anchors to the **right edge** of the screen with a 12px margin (customizable via `LayerShell.set_margin()`).
-- Stretches **full height** (top + bottom anchors enabled).
-- Stays on the **OVERLAY layer** — always above other windows, cannot be covered.
+#### Mouse & Keyboard input
+- **Click-through:** The window uses an empty `cairo.Region()` for input handling, allowing all mouse clicks to pass through to the underlying window (your game).
+- **Keyboard mode:** Set to `KeyboardMode.NONE` — the overlay cannot receive keyboard or mouse input by design (this prevents interfering with gameplay).
+- **Closing:** Use `gjs main.js --quit` (or a custom COSMIC keyboard shortcut) to terminate the app without window focus.
 
 ### Debugging
 

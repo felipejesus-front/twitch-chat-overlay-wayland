@@ -82,6 +82,7 @@ sudo ln -sf /usr/local/lib/x86_64-linux-gnu/girepository-1.0/Gtk4LayerShell-1.0.
 ```
 
 > **Sem gtk4-layer-shell:** o app funciona como uma janela comum — posicione-a manualmente sobre o jogo. Se a lib não for encontrada, a janela mostra um indicador `⚠ Overlay OFF`.
+> Neste modo, atalhos de teclado (Esc, Ctrl+B, Ctrl+Shift+C) **funcionarão** porque a janela recebe foco.
 
 ### 3. Clone o repositório
 
@@ -104,7 +105,68 @@ gjs main.js '#gaules'   # com ou sem # — ambos funcionam
 
 > **Importante:** execute sempre a partir da raiz do projeto.
 
-### Atalhos
+### Alternativa: Instale globalmente
+
+Em vez de rodar do diretório do projeto, você pode instalar o app sistematicamente:
+
+#### Método A: Via make install
+```bash
+sudo make install      # instala em /usr/share e /usr/bin
+cosmic-twitch-chat --set-channel gaules   # salva canal padrão
+cosmic-twitch-chat     # executa com o canal salvo
+```
+
+#### Método B: Via pacote .deb
+```bash
+make deb               # gera build/cosmic-twitch-chat_1.0.0_all.deb
+sudo dpkg -i build/cosmic-twitch-chat_1.0.0_all.deb
+```
+
+Após instalar, o app aparece no launcher do COSMIC como **"Cosmic Twitch Chat"**.
+
+#### Método C: Defina um canal padrão
+```bash
+# Salve o canal para usar depois
+gjs main.js --set-channel gaules
+
+# Execute sem argumentos — usa o canal salvo
+gjs main.js
+```
+
+O canal padrão é armazenado em `~/.config/cosmic-twitch-chat/channel`.
+
+#### Desinstalar
+```bash
+sudo make uninstall    # se instalou via make install
+# ou
+sudo dpkg -r cosmic-twitch-chat   # se instalou via deb
+```
+
+### Fechando o overlay
+
+Como o chat é transparente e deixa o mouse passar (click-through), atalhos de teclado não funcionam enquanto ele tem foco.
+
+**Como fechar:**
+
+- Via linha de comando:
+  ```bash
+  gjs main.js --quit    # encerra a instância em execução
+  ```
+
+- No terminal:
+  ```bash
+  Ctrl+C    # para o processo
+  ```
+
+- Atalho customizado no COSMIC:
+  - Abra **Settings do COSMIC → Teclado → Atalhos**
+  - Clique **+** para adicionar atalho
+  - Configure **Comando** para: `gjs /usr/share/cosmic-twitch-chat/main.js --quit`
+  - Associe a (ex) **Ctrl+Shift+Esc**
+
+### Atalhos (modo legado)
+
+Se você estiver executando em **modo não-overlay** (sem gtk4-layer-shell), os atalhos funcionam:
 
 | Tecla | Ação |
 |-------|------|
@@ -156,10 +218,47 @@ Quando **gtk4-layer-shell** está instalado, o app automaticamente:
 
 - [ ] Suporte a emotes (BetterTTV / FFZ / 7TV)
 - [ ] Badges de inscrito, moderador, broadcaster
-- [ ] Click-through — mouse passa direto para o app por baixo
 - [ ] Arquivo de configuração (fonte, opacidade, largura, canal)
 - [ ] Multi-canal com abas
 - [ ] Destaque de menções do seu username
+- [ ] Toggle de modo edição — tornar janela temporariamente móvel & focusável para reposicionamento
+
+---
+
+## Build & Empacotamento
+
+### Requisitos
+
+- `gjs` (runtime GNOME JavaScript)
+- `gir1.2-gtk-4.0` e `gir1.2-soup-3.0` (bindings GObject Introspection)
+- `make` (para construir o pacote)
+- `dpkg-deb` (para gerar pacote .deb; vem com `dpkg`)
+
+Todos são ferramentas leves de texto/script — nenhuma compilação necessária.
+
+### Targets do Makefile
+
+```bash
+make install              # Instala globalmente em /usr/share e /usr/bin
+make uninstall            # Remove instalação sistematicamente
+make deb                  # Gera pacote .deb em build/
+make clean                # Remove pasta build/
+```
+
+### Versão customizada no .deb
+
+```bash
+make deb VERSION=2.0.0    # Gera cosmic-twitch-chat_2.0.0_all.deb
+```
+
+### Para manutentores de distribuição
+
+O pacote declara:
+- **Depende de:** `gjs`, `gir1.2-gtk-4.0`, `gir1.2-soup-3.0`
+- **Recomenda:** `gtk4-layer-shell` (opcional, mas altamente recomendado)
+- **Arquitetura:** `all` (baseado em script, roda em qualquer sistema com GJS/GTK4)
+
+Todos os arquivos são colocados em `/usr/share/cosmic-twitch-chat/` com um wrapper bash simples em `/usr/bin/cosmic-twitch-chat`.
 
 ---
 
@@ -167,20 +266,22 @@ Quando **gtk4-layer-shell** está instalado, o app automaticamente:
 
 ### Melhorias principais
 
-#### `main.js` — mecanismo de auto-preload
-- **Problema:** gtk4-layer-shell precisa interceptar a chamada `wl_registry_add_listener` do Wayland, mas o GJS carrega a typelib muito tarde (depois que GTK já conectou).
-- **Solução:** Na inicialização, `main.js` detecta se a lib está disponível e se re-executa com `LD_PRELOAD=/usr/local/lib/x86_64-linux-gnu/libgtk4-layer-shell.so`. Uma variável sentinel `_COSMIC_PRELOADED=1` evita recursão infinita.
-- **Resultado:** `gjs main.js canal` agora funciona out-of-the-box sem precisar de `LD_PRELOAD` manual.
+#### `main.js` — mecanismo de auto-preload & features CLI
+- **Auto-preload:** Detecta se gtk4-layer-shell está disponível e se re-executa com `LD_PRELOAD` antes que GTK conecte ao Wayland.
+- **Busca em múltiplos caminhos:** Procura a lib em locais padrão: `/usr/local/lib/...`, `/usr/lib/...`, `/usr/lib64/...`
+- **Flag `--quit`:** Lê o PID de `~/.cache/cosmic-twitch-chat/pid` e envia sinal `kill` para a instância em execução.
+- **Flag `--set-channel`:** Salva o nome do canal em `~/.config/cosmic-twitch-chat/channel` para futuras execuções sem argumentos.
+- **Arquivo pid:** Automaticamente escrito pelo app na inicialização e limpado no encerramento (handlers SIGTERM/SIGINT).
 
 #### `ui/window.js` — ordem de inicialização & modo de teclado
 - **Correção de ordem:** `_applyLayerShell()` agora executa **antes** de `_buildLayout()`, conforme exige a especificação do layer-shell.
 - **Modo de teclado:** Adicionado `LayerShell.set_keyboard_mode(..., ON_DEMAND)` — com o modo padrão `NONE`, janelas overlay silenciosamente dropavam todos os eventos de teclado, quebrando atalhos como `Esc`, `Ctrl+B`, `Ctrl+Shift+C`.
 - **Indicador visual:** Mostra `⚠ Overlay OFF` na barra de controle se a lib não for encontrada, com um tooltip explicando o que instalar.
 
-#### Posicionamento da janela
-- Ancora na **borda direita** da tela com margem de 12px (customizável via `LayerShell.set_margin()`).
-- Estica na **altura total** (anchors top + bottom habilitados).
-- Fica na camada **OVERLAY** — sempre acima de outras janelas, não pode ser coberta.
+#### Input de mouse e teclado
+- **Click-through:** A janela usa `cairo.Region()` vazia para input, permitindo que todos os cliques do mouse passem para a janela por baixo (seu jogo).
+- **Modo de teclado:** Definido como `KeyboardMode.NONE` — o overlay não pode receber input de teclado ou mouse por design (isso previne interferência com a gameplay).
+- **Encerrando:** Use `gjs main.js --quit` (ou um atalho customizado do COSMIC) para terminar o app sem precisar de foco da janela.
 
 ### Diagnóstico
 
