@@ -6,6 +6,9 @@ const { Gtk, Gdk, GLib, Gio } = imports.gi;
 const { ChatView }  = imports.ui.chat_view;
 const { TwitchIRC } = imports.services.twitch_irc;
 
+let cairo = null;
+try { cairo = imports.gi.cairo; } catch (_e) { /* sem cairo GI */ }
+
 // ── Optional: gtk4-layer-shell ─────────────────────────────────────────────
 //
 // gtk4-layer-shell gives the window a real Wayland layer-shell surface:
@@ -76,9 +79,9 @@ var CosmicTwitchChatWindow = class CosmicTwitchChatWindow {
         this._loadCSS();
         this._applyLayerShell(); // deve rodar antes de _buildLayout e present()
         this._buildLayout();
+        this._makeClickThrough();
         this._bindShortcuts();
         this._startIRC();
-        this._bgIndex = WIN_BG_DEFAULT;
     }
 
     present() {
@@ -148,26 +151,9 @@ var CosmicTwitchChatWindow = class CosmicTwitchChatWindow {
             bar.append(warn);
         }
 
-        this._bgBtn = new Gtk.Button({ label: 'BG: Nenhum' });
-        this._bgBtn.connect('clicked', () => this._cycleBg());
-        bar.append(this._bgBtn);
-
         root.append(bar);
         root.append(this._chat.widget);
         this._win.set_child(root);
-    }
-
-    /** Cycle the window background opacity and update the button label. */
-    _cycleBg() {
-        const prev = WIN_BG_LEVELS[this._bgIndex];
-        if (prev.cssClass) this._win.remove_css_class(prev.cssClass);
-
-        this._bgIndex = (this._bgIndex + 1) % WIN_BG_LEVELS.length;
-
-        const next = WIN_BG_LEVELS[this._bgIndex];
-        if (next.cssClass) this._win.add_css_class(next.cssClass);
-
-        this._bgBtn.set_label(`BG: ${next.name}`);
     }
 
     _applyLayerShell() {
@@ -191,10 +177,9 @@ var CosmicTwitchChatWindow = class CosmicTwitchChatWindow {
             // Don't reserve space — other windows draw under this overlay
             LayerShell.set_exclusive_zone(this._win, 0);
             LayerShell.set_namespace(this._win, 'cosmic-twitch-chat');
-            // ON_DEMAND: compositor concede foco de teclado quando o usuário
-            // interage com a janela — necessário para os atalhos funcionarem
-            // no modo overlay (padrão NONE bloquearia todo input de teclado)
-            LayerShell.set_keyboard_mode(this._win, LayerShell.KeyboardMode.ON_DEMAND);
+            // NONE: superfície click-through não precisa de foco de teclado;
+            // atalhos estão desabilitados quando a janela não recebe input.
+            LayerShell.set_keyboard_mode(this._win, LayerShell.KeyboardMode.NONE);
             this._layerShellActive = true;
             log('[window] gtk4-layer-shell ativo — modo overlay ON (sempre à frente + flutuante)');
         } catch (e) {
@@ -203,19 +188,31 @@ var CosmicTwitchChatWindow = class CosmicTwitchChatWindow {
     }
 
     _bindShortcuts() {
-        const add = (name, accels, fn) => {
-            const action = new Gio.SimpleAction({ name });
-            action.connect('activate', fn);
-            this._app.add_action(action);
-            this._app.set_accels_for_action(`app.${name}`, accels);
-        };
+        // Atalhos desabilitados: a janela é click-through e não recebe input.
+        // Para fechar o app, use Ctrl+C no terminal.
+    }
 
-        // ESC → quit the app
-        add('quit',       ['Escape'],            () => this._app.quit());
-        // Ctrl+Shift+C → wipe the chat history
-        add('clear-chat', ['<Control><Shift>c'], () => this._chat.clear());
-        // Ctrl+B → cycle window background opacity
-        add('cycle-bg',   ['<Control>b'],        () => this._cycleBg());
+    /**
+     * Torna a janela totalmente click-through: define uma input region vazia
+     * na superfície GDK, fazendo todos os cliques/toques passarem direto para
+     * as janelas abaixo.
+     */
+    _makeClickThrough() {
+        this._win.connect('realize', () => {
+            try {
+                const surface = this._win.get_surface();
+                if (surface && typeof surface.set_input_region === 'function') {
+                    // Cria uma region vazia — nenhuma área da superfície aceita input
+                    const region = new cairo.Region();
+                    surface.set_input_region(region);
+                    log('[window] click-through ativo — cliques passam para janelas abaixo');
+                } else {
+                    log('[window] set_input_region indisponível — janela permanece clicável');
+                }
+            } catch (e) {
+                logError(e, '[window] Falha ao configurar click-through');
+            }
+        });
     }
 
     _startIRC() {

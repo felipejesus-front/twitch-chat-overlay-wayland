@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Cosmic Twitch Chat
+GenericName=Twitch Chat Overlay
+Comment=Transparent Twitch chat overlay for Wayland compositors
+Comment[pt_BR]=Overlay transparente de chat da Twitch para Wayland
+Exec=cosmic-twitch-chat
+Terminal=false
+Categories=Network;Chat;
+Keywords=twitch;chat;overlay;stream;wayland;
+StartupNotify=false
+StartupWMClass=dev.cosmic.twitch-chat
+
+[Desktop Action quit]
+Name=Quit Overlay
+Name[pt_BR]=Encerrar Overlay
+Exec=cosmic-twitch-chat --quit
